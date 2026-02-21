@@ -4,14 +4,19 @@ from discord import app_commands
 import os
 import json
 import time
+import random
 
 TOKEN = os.getenv("TOKEN")
 
 CHAT_CHANNEL_ID = 1474519935857328286
 ADMIN_CHANNEL_ID = 1474519935857328286
+ROLE_BONUS_ID = 1474519934351442047
 
 MIN_WITHDRAW = 100
-MESSAGE_REWARD = 4
+MIN_BET = 15
+
+# Тестовая награда
+MESSAGE_REWARD = 3
 COOLDOWN = 10
 MIN_LENGTH = 3
 
@@ -24,18 +29,22 @@ intents.members = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 tree = bot.tree
 
-# ---------- DATA ----------
+# ---------------- DATA ----------------
+
 if os.path.exists(DATA_FILE):
     with open(DATA_FILE, "r") as f:
         data = json.load(f)
 else:
     data = {"users": {}}
 
+
 def save_data():
     with open(DATA_FILE, "w") as f:
         json.dump(data, f, indent=4)
 
-# ---------- MESSAGE FARM ----------
+
+# ---------------- MESSAGE FARM ----------------
+
 @bot.event
 async def on_message(message):
     if message.author.bot:
@@ -53,11 +62,11 @@ async def on_message(message):
         data["users"][user_id] = {
             "messages": 0,
             "balance": 0,
-            "last_time": 0
+            "last_time": 0,
+            "transactions": []
         }
 
     user = data["users"][user_id]
-
     now = time.time()
 
     if now - user["last_time"] < COOLDOWN:
@@ -66,22 +75,49 @@ async def on_message(message):
     user["last_time"] = now
     user["messages"] += 1
 
-    # TEST REWARD (1 message = reward once)
+    # TEST MODE → 1 сообщение = 3 Robux
     if user["messages"] == 1:
         user["balance"] += MESSAGE_REWARD
-        await message.channel.send(
-            f"{message.author.mention} получил {MESSAGE_REWARD} Robux!"
-        )
 
     save_data()
     await bot.process_commands(message)
 
-# ---------- SLASH COMMANDS ----------
 
-@bot.event
-async def on_ready():
-    print(f"Бот запущен как {bot.user}")
-    await tree.sync()
+# ---------------- TRANSACTIONS ----------------
+
+@tree.command(name="transfer", description="Перевести Robux")
+async def transfer(interaction: discord.Interaction, member: discord.Member, amount: int):
+
+    sender = str(interaction.user.id)
+    receiver = str(member.id)
+
+    if amount <= 0:
+        await interaction.response.send_message("Сумма должна быть > 0", ephemeral=True)
+        return
+
+    if sender not in data["users"] or data["users"][sender]["balance"] < amount:
+        await interaction.response.send_message("Недостаточно Robux", ephemeral=True)
+        return
+
+    if receiver not in data["users"]:
+        data["users"][receiver] = {"messages": 0, "balance": 0, "last_time": 0, "transactions": []}
+
+    data["users"][sender]["balance"] -= amount
+    data["users"][receiver]["balance"] += amount
+
+    data["users"][sender]["transactions"].append(
+        f"Sent {amount} to {member.name}"
+    )
+
+    save_data()
+
+    await interaction.response.send_message(
+        f"Переведено {amount} Robux → {member.mention}",
+        ephemeral=True
+    )
+
+
+# ---------------- BALANCE ----------------
 
 def progress_bar(balance):
     max_balance = 100
@@ -92,14 +128,14 @@ def progress_bar(balance):
 
     return "🟩" * filled + "🟥" * empty
 
+
 @tree.command(name="balance", description="Баланс")
 async def balance(interaction: discord.Interaction):
+
     user_id = str(interaction.user.id)
 
     if user_id not in data["users"]:
-        await interaction.response.send_message(
-            "Нет данных", ephemeral=True
-        )
+        await interaction.response.send_message("Нет данных", ephemeral=True)
         return
 
     user = data["users"][user_id]
@@ -111,35 +147,83 @@ async def balance(interaction: discord.Interaction):
         ephemeral=True
     )
 
-@tree.command(name="withdraw", description="Вывод Robux")
-async def withdraw(interaction: discord.Interaction):
+
+# ---------------- MISSIONS ----------------
+
+@tree.command(name="missions", description="Миссии")
+async def missions(interaction: discord.Interaction):
+
     user_id = str(interaction.user.id)
 
     if user_id not in data["users"]:
+        await interaction.response.send_message("Нет данных", ephemeral=True)
         return
 
     user = data["users"][user_id]
 
-    if user["balance"] < MIN_WITHDRAW:
+    # Тест миссия
+    goal = 1
+    reward = 3
+
+    progress = min(user["messages"], goal)
+
+    text = f"Миссия: {progress}/{goal}\nНаграда: {reward} Robux"
+
+    if progress >= goal:
+        text += "\nМожно получить награду!"
+
+    await interaction.response.send_message(text, ephemeral=True)
+
+
+# ---------------- ROULETTE ----------------
+
+@tree.command(name="roulette", description="Рулетка")
+async def roulette(interaction: discord.Interaction, bet: int):
+
+    user_id = str(interaction.user.id)
+
+    if bet < MIN_BET:
         await interaction.response.send_message(
-            f"Минимум вывода {MIN_WITHDRAW}",
+            f"Минимальная ставка {MIN_BET}",
             ephemeral=True
         )
         return
 
-    user["balance"] -= MIN_WITHDRAW
+    if user_id not in data["users"] or data["users"][user_id]["balance"] < bet:
+        await interaction.response.send_message("Нет Robux", ephemeral=True)
+        return
+
+    data["users"][user_id]["balance"] -= bet
+
+    # Шансы
+    roll = random.random()
+
+    reward = 0
+
+    if roll < 0.0001:
+        reward = 100
+    elif roll < 0.10:
+        reward = 20
+    elif roll < 0.46:
+        reward = 10
+    elif roll < 0.51 and ROLE_BONUS_ID != 0:
+        reward = "ROLE"
+
+    if reward == "ROLE":
+        member = interaction.user
+        role = interaction.guild.get_role(ROLE_BONUS_ID)
+
+        if role:
+            await member.add_roles(role)
+
+        result_text = "Вы выиграли роль!"
+    else:
+        data["users"][user_id]["balance"] += reward + bet
+        result_text = f"Вы выиграли {reward} Robux!"
+
     save_data()
 
-    admin = bot.get_channel(ADMIN_CHANNEL_ID)
+    await interaction.response.send_message(result_text, ephemeral=True)
 
-    if admin:
-        await admin.send(
-            f"Вывод заявки от {interaction.user.mention}"
-        )
-
-    await interaction.response.send_message(
-        "Заявка отправлена",
-        ephemeral=True
-    )
 
 bot.run(TOKEN)
