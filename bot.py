@@ -11,8 +11,11 @@ CHAT_CHANNEL_ID = 1474519935857328286
 
 MESSAGE_REWARD = 3
 
-# DATABASE
-conn = sqlite3.connect("database.db", check_same_thread=False)
+# Persistent database path (Railway volume friendly)
+DB_PATH = "/app/database.db"
+
+# Database connection
+conn = sqlite3.connect(DB_PATH, check_same_thread=False)
 cursor = conn.cursor()
 
 cursor.execute("""
@@ -26,14 +29,14 @@ CREATE TABLE IF NOT EXISTS users(
 
 conn.commit()
 
-# BOT
+# Bot setup
 intents = discord.Intents.default()
 intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 tree = bot.tree
 
-# FARM (БЕЗ COOLDOWN)
+# ---------- FARM ----------
 @bot.event
 async def on_message(message):
 
@@ -55,7 +58,6 @@ async def on_message(message):
 
     conn.commit()
 
-    # Начисление за сообщение
     cursor.execute("""
     UPDATE users
     SET balance = balance + ?,
@@ -68,13 +70,13 @@ async def on_message(message):
 
     await bot.process_commands(message)
 
-# READY
+# ---------- READY ----------
 @bot.event
 async def on_ready():
     print(f"Бот запущен как {bot.user}")
     await tree.sync()
 
-# BALANCE
+# ---------- BALANCE ----------
 @tree.command(name="balance", description="Баланс")
 async def balance(interaction: discord.Interaction):
 
