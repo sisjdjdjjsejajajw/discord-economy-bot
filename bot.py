@@ -8,10 +8,8 @@ import time
 TOKEN = os.getenv("TOKEN")
 
 CHAT_CHANNEL_ID = 1474519935857328286
-ADMIN_CHANNEL_ID = 1474519935857328286
 
 MESSAGE_REWARD = 3
-COOLDOWN = 10
 
 # DATABASE
 conn = sqlite3.connect("database.db", check_same_thread=False)
@@ -35,7 +33,7 @@ intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 tree = bot.tree
 
-# FARM
+# FARM (БЕЗ COOLDOWN)
 @bot.event
 async def on_message(message):
 
@@ -57,15 +55,7 @@ async def on_message(message):
 
     conn.commit()
 
-    cursor.execute("""
-    SELECT balance, messages, last_time FROM users WHERE user_id=?
-    """, (user_id,))
-
-    user = cursor.fetchone()
-
-    if time.time() - user[2] < COOLDOWN:
-        return
-
+    # Начисление за сообщение
     cursor.execute("""
     UPDATE users
     SET balance = balance + ?,
